@@ -36,11 +36,14 @@ SHOT 02 — 8s
 
 # Vercel sẽ tự động đọc biến môi trường này
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "NHAP_API_KEY_TRA_PHI_CUA_BAN_VAO_VERCEL")
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
 
-VALID_LICENSES = {
-    "VIP_KEY_123": {"user": "Khách hàng A", "status": "active"},
-    "TEST_KEY_456": {"user": "Khách hàng B", "status": "expired"}
-}
+# Khởi tạo Supabase Client
+from supabase import create_client, Client
+supabase: Client = None
+if SUPABASE_URL and SUPABASE_KEY:
+    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 class TranscriptRequest(BaseModel):
     transcript: str
@@ -48,9 +51,26 @@ class TranscriptRequest(BaseModel):
 def verify_license(authorization: str = Header(None)):
     if not authorization:
          raise HTTPException(status_code=401, detail="Thiếu License Key (Header Authorization)")
+    
     key = authorization.replace("Bearer ", "")
-    if key not in VALID_LICENSES or VALID_LICENSES[key]["status"] != "active":
-        raise HTTPException(status_code=403, detail="License Key không hợp lệ hoặc đã hết hạn!")
+    
+    if not supabase:
+         raise HTTPException(status_code=500, detail="Chưa cấu hình Supabase URL và Key trên Vercel!")
+         
+    # Truy vấn bảng 'licenses' trên Supabase
+    try:
+        response = supabase.table("licenses").select("*").eq("key", key).execute()
+        data = response.data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi kết nối cơ sở dữ liệu: {str(e)}")
+
+    if not data:
+        raise HTTPException(status_code=403, detail="License Key không tồn tại!")
+        
+    license_info = data[0]
+    if license_info.get("status") != "active":
+        raise HTTPException(status_code=403, detail="License Key đã bị khóa hoặc hết hạn!")
+        
     return key
 
 @app.get("/")
